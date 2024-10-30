@@ -1,4 +1,5 @@
-with cac_metrics as (
+with 
+cac_metrics as (
     select 
     seq4()+1 as index
     , case index
@@ -94,6 +95,7 @@ with cac_metrics as (
     , ad.adp_id
     , ad.AGENT_TYPE_AT_TIME as agent_status_at_accepted_date
     , adp.sales_channel
+    , adp.agent_end_month_type
     ,  case 
         when dom.original_agent_id = '5e6025b79adef3226cbb8b79' then 'Duane Owens'  
         when dom.original_agent_id = '5e63cfe1c21f82955227916f' then 'Duane Owens'  
@@ -138,7 +140,6 @@ with cac_metrics as (
     --and bdr_id is null and bdr_flag = 'BDR'
     --and dom.original_merchant_id = '6607398475f3c9003c235b37'
     )
-
 , date_spine as (
     select distinct
     date_trunc('month', date_key) as base_month
@@ -645,6 +646,12 @@ with cac_metrics as (
     , sum(iff(approved_merchant_vertical = 'Restaurant' and dom.sales_channel = 'Dealer', 1, 0)) as dealer_activated_restaurant_in_month
     , sum(iff(approved_merchant_vertical = 'Express' and dom.sales_channel = 'Dealer', 1, 0)) as dealer_activated_express_in_month
     , sum(iff(approved_merchant_vertical = 'SMB' and dom.sales_channel = 'Dealer', 1, 0)) as dealer_activated_smb_in_month
+    , sum(iff(dom.agent_end_month_type = 'W2-FT Commission', 1, 0)) as commission_activated_in_month
+    , sum(iff(dom.agent_end_month_type = 'W2-FT Salary', 1, 0)) as salary_activated_in_month
+    , sum(iff(dom.agent_end_month_type = '1099', 1, 0)) as "1099_activated_in_month"
+    , sum(iff(dom.agent_end_month_type = 'Dealer', 1, 0)) as dealer_activated_in_month
+    , sum(iff(dom.agent_end_month_type = 'Inside Sales', 1, 0)) as inside_sales_activated_in_month
+    , sum(iff(dom.agent_end_month_type = 'Mid Market AE', 1, 0)) as mid_market_activated_in_month
     , count(distinct dom.original_merchant_id) as activated_total_in_month
     , count(distinct (case when dom.sales_channel = 'Salary' then dom.agent_id end)) as w2_salary_productive_headcount
     , count(distinct (case when dom.sales_channel = 'Commission' then dom.agent_id end)) as w2_commission_productive_headcount
@@ -653,7 +660,7 @@ with cac_metrics as (
     left join original_merchant as dom on dom.processing_active_month = d.base_month and dom.activated_arr > 0
     group by all
     )
---, ae_headcount as (
+, ae_headcount as (
     select 
     d.*
     , count(distinct case when e.unit_economics_sub_function = 'BDR' then e.adp_id end) as bdr_headcount
@@ -664,7 +671,6 @@ with cac_metrics as (
     from activations d
     left join employee_census e on e.file_base_month_start = d.base_month
     group by all
-    ;
     )
 --- begin cost grouping at month, sub_function, and unit_econ_l3
 , bdr_cs_mktg_dealer_mgmt_sales_mgmt_sales_ops_sales_support_team_leads as (
@@ -672,9 +678,31 @@ with cac_metrics as (
         , unit_economics_sub_function
         , unit_economics_l3
         , sum(amount) as amount
+        , case when unit_economics_l3 = 'Commission Only' then commission_activated_in_month
+               when unit_economics_l3 = 'Salary' then salary_activated_in_month
+               when unit_economics_l3 = '1099s' then "1099_activated_in_month"
+               when unit_economics_l3 = 'Dealer' then dealer_activated_in_month
+               when unit_economics_l3 = 'Inside Sales' then inside_sales_activated_in_month
+               when unit_economics_l3 = 'Mid Market' then mid_market_activated_in_month
+          else 0 end as activated_channel_specific_mids
+        -- activated_channel_specific_mids
+        -- activated_channel_specific_cost_per_mid
+        -- activated_total_mids
+        -- activated_cost_per_mid
+        -- implementation_mid_level
+        -- implementation_leftover
+        -- implementation_units
+        -- implementation_cpu
+        -- activated_bdr_mids
+        -- bdr_cpu
+        -- activated_arr
+        -- arr_cpu
+        -- commission_mid_level
+        -- commission_leftover
+        -- commission_allocated_per_mid
 
     --- complete this with Bo    
-    , sum(case when unit_economics_sub_function = 'BDR' and unit_economics_l3 = 'Bonuses Commissions' then per_unit_value end) as bdr_cost_total_month_bonus_commission
+    , sum(case when unit_economics_sub_function = 'BDR' and unit_economics_l3 = 'Bonuses Commissions' then amount end) as bdr_cost_total_month_bonus_commission
     , sum(case when unit_economics_sub_function = 'BDR' and unit_economics_l3 <> 'Bonuses Commissions' then amount end) as bdr_cost_total_month_non_commission
     , sum(case when unit_economics_l3 = 'Merchant Referral' then amount end) as total_month_merchant_referral_cost
     , sum(case when unit_economics_sub_function = 'Commission Only' and unit_economics_l3 = 'Bonuses Commissions' then amount end) as w2_commission_cost_total_month_bonus_commission
@@ -694,11 +722,14 @@ with cac_metrics as (
 
     , sum(case when unit_economics_sub_function = '1099s' and unit_economics_l3 = 'Bonuses Commissions' then amount end) as cost_total_month_bonus_commission_1099
     , sum(case when unit_economics_sub_function = '1099s' and unit_economics_l3 <> 'Bonuses Commissions' then amount end) as cost_total_month_non_commission_1099
-    from gldata
+    from gldata g
+    left join activations a on g.accounting_period_start_date = a.base_month
     where true
     and unit_economics_cac <> 'Non CAC'
     group by all
 )
+-- select * from activations;
+select * from bdr_cs_mktg_dealer_mgmt_sales_mgmt_sales_ops_sales_support_team_leads;
 , bdr_sales_channel_vertical_allocation_stats_step1 as (
     select 
     processing_active_month
